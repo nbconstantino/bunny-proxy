@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import fetch from 'node-fetch'; // importante
+import fetch from 'node-fetch';
 
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -16,7 +16,11 @@ app.get('/list', async (req, res) => {
     const path = req.query.path || '';
     if (!path) return res.status(400).json({ error: 'Parâmetro path é obrigatório' });
 
-    const url = `https://${HOSTNAME}/${STORAGE_ZONE}/${path}`;
+    // Garante que o path termina com "/"
+    const normalizedPath = path.endsWith('/') ? path : path + '/';
+
+    // Monta a URL correta para listar arquivos
+    const url = `https://${HOSTNAME}/${STORAGE_ZONE}/${normalizedPath}`;
 
     const response = await fetch(url, {
       headers: {
