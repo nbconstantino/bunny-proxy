@@ -1,65 +1,50 @@
 const express = require('express');
-const fetch = require('node-fetch');
+const axios = require('axios');
 const cors = require('cors');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-
-const STORAGE_ZONE = 'fotossite';
-const API_KEY = '0e90e287-1f58-4bbf-865c452c8a71-c2fd-4bf2';
-const BUNNY_URL = 'https://br.storage.bunnycdn.com';
-
 app.use(cors());
 
-app.get('/files', async (req, res) => {
-  const { path } = req.query;
+const PORT = process.env.PORT || 10000;
+const BUNNY_STORAGE_ZONE = 'fotossite';
+const BUNNY_STORAGE_API = `https://br.storage.bunnycdn.com/${BUNNY_STORAGE_ZONE}`;
+const BUNNY_ACCESS_KEY = '0e90e287-1f58-4bbf-865c452c8a71-c2fd-4bf2'; // SUA CHAVE
 
-  if (!path) {
-    return res.status(400).json({ error: 'Missing path parameter' });
-  }
-
-  const fullUrl = `${BUNNY_URL}/${STORAGE_ZONE}/${path}`;
+// Rota para listar arquivos em uma pasta
+app.get('/list', async (req, res) => {
+  const path = req.query.path || '';
   try {
-    const response = await fetch(fullUrl, {
+    const response = await axios.get(`${BUNNY_STORAGE_API}/${path}`, {
       headers: {
-        AccessKey: API_KEY,
-        accept: 'application/json'
+        AccessKey: BUNNY_ACCESS_KEY
       }
     });
-
-    if (!response.ok) {
-      return res.status(response.status).json({ error: `Bunny API returned ${response.status}` });
-    }
-
-    const data = await response.json();
-    res.json(data);
+    res.json(response.data);
   } catch (err) {
-    res.status(500).json({ error: 'Erro ao buscar arquivos.' });
+    console.error('Erro ao listar arquivos:', err.message);
+    res.status(500).json({ error: 'Erro ao listar arquivos' });
   }
 });
 
+// Rota para baixar um arquivo
 app.get('/download', async (req, res) => {
-  const { path } = req.query;
-  if (!path) return res.status(400).send('Missing path');
+  const path = req.query.path;
+  if (!path) return res.status(400).json({ error: 'Parâmetro "path" é obrigatório' });
 
-  const downloadUrl = `${BUNNY_URL}/${STORAGE_ZONE}/${path}`;
   try {
-    const response = await fetch(downloadUrl, {
-      method: 'GET',
+    const fileUrl = `${BUNNY_STORAGE_API}/${path}`;
+    const fileResponse = await axios.get(fileUrl, {
+      responseType: 'stream',
       headers: {
-        AccessKey: API_KEY
+        AccessKey: BUNNY_ACCESS_KEY
       }
     });
 
-    if (!response.ok) {
-      return res.status(response.status).send('Erro no download');
-    }
-
-    const fileName = path.split('/').pop();
-    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-    response.body.pipe(res);
+    res.setHeader('Content-Disposition', `attachment; filename="${path.split('/').pop()}"`);
+    fileResponse.data.pipe(res);
   } catch (err) {
-    res.status(500).send('Erro ao baixar arquivo');
+    console.error('Erro ao baixar arquivo:', err.message);
+    res.status(500).json({ error: 'Erro ao baixar arquivo' });
   }
 });
 
