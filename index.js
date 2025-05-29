@@ -11,15 +11,13 @@ const HOSTNAME = 'br.storage.bunnycdn.com';
 
 app.use(cors());
 
+// Listagem de arquivos em uma pasta
 app.get('/list', async (req, res) => {
   try {
     const path = req.query.path || '';
     if (!path) return res.status(400).json({ error: 'Parâmetro path é obrigatório' });
 
-    // Garante que o path termina com "/"
     const normalizedPath = path.endsWith('/') ? path : path + '/';
-
-    // Monta a URL correta para listar arquivos
     const url = `https://${HOSTNAME}/${STORAGE_ZONE}/${normalizedPath}`;
 
     const response = await fetch(url, {
@@ -41,12 +39,35 @@ app.get('/list', async (req, res) => {
   }
 });
 
-app.get('/download', (req, res) => {
+// Proxy de download autenticado
+app.get('/download', async (req, res) => {
   const path = req.query.path;
   if (!path) return res.status(400).json({ error: 'Parâmetro path é obrigatório' });
 
   const url = `https://${HOSTNAME}/${STORAGE_ZONE}/${path}`;
-  res.redirect(url);
+
+  try {
+    const response = await fetch(url, {
+      headers: {
+        AccessKey: API_KEY
+      }
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      return res.status(response.status).send(text);
+    }
+
+    // Repassa o tipo de conteúdo e força o download
+    res.setHeader('Content-Type', response.headers.get('content-type') || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${decodeURIComponent(path.split('/').pop())}"`);
+
+    // Faz streaming do conteúdo direto para o navegador
+    response.body.pipe(res);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erro ao baixar o arquivo', details: err.message });
+  }
 });
 
 app.listen(PORT, () => {
