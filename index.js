@@ -11,70 +11,65 @@ const HOSTNAME = 'br.storage.bunnycdn.com';
 
 app.use(cors());
 
-// Função recursiva para listar arquivos de subpastas
-async function listarArquivos(path) {
-  const url = `https://${HOSTNAME}/${STORAGE_ZONE}/${path}`;
-  const response = await fetch(url, {
-    headers: {
-      AccessKey: API_KEY,
-      Accept: 'application/json'
-    }
-  });
-
-  if (!response.ok) throw new Error(`Erro ao acessar ${path}: ${await response.text()}`);
-
-  const arquivos = await response.json();
-  let todos = [];
-
-  for (const item of arquivos) {
-    if (item.IsDirectory) {
-      const subPath = `${path}/${item.ObjectName}`;
-      const subArquivos = await listarArquivos(subPath);
-      todos = todos.concat(subArquivos);
-    } else {
-      todos.push({ ...item, fullPath: `${path}/${item.ObjectName}` });
-    }
-  }
-
-  return todos;
-}
-
-// Endpoint de listagem
+// Listagem de arquivos em uma pasta
 app.get('/list', async (req, res) => {
   try {
-    const path = req.query.path;
-    const term = (req.query.term || '').toLowerCase();
-    const type = req.query.type;
+    const path = req.query.path || '';
+    if (!path) return res.status(400).json({ error: 'Parâmetro path é obrigatório' });
 
-    if (!path) return res.status(400).json({ error: 'Path é obrigatório' });
+    const normalizedPath = path.endsWith('/') ? path : path + '/';
+    const url = `https://${HOSTNAME}/${STORAGE_ZONE}/${normalizedPath}`;
 
-    const arquivos = await listarArquivos(path);
-    const filtrados = arquivos.filter(file =>
-      file.ObjectName.toLowerCase().includes(term) &&
-      (!type || file.ObjectName.toLowerCase().endsWith(type))
-    );
+    const response = await fetch(url, {
+      headers: {
+        AccessKey: API_KEY,
+        Accept: 'application/json'
+      }
+    });
 
-    res.json(filtrados);
+    if (!response.ok) {
+      const errorText = await response.text();
+      return res.status(response.status).json({ error: 'Erro ao listar arquivos', details: errorText });
+    }
+
+    const data = await response.json();
+    res.json(data);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Erro interno no servidor', details: err.message });
   }
 });
 
-// Endpoint de download autenticado
+// Proxy de download autenticado
 app.get('/download', async (req, res) => {
   const path = req.query.path;
-  if (!path) return res.status(400).json({ error: 'Path é obrigatório' });
+  if (!path) return res.status(400).json({ error: 'Parâmetro path é obrigatório' });
 
   const url = `https://${HOSTNAME}/${STORAGE_ZONE}/${path}`;
-  const response = await fetch(url, { headers: { AccessKey: API_KEY } });
 
-  if (!response.ok) return res.status(response.status).send(await response.text());
+  try {
+    const response = await fetch(url, {
+      headers: {
+        AccessKey: API_KEY
+      }
+    });
 
-  res.setHeader('Content-Type', response.headers.get('content-type') || 'application/octet-stream');
-  res.setHeader('Content-Disposition', `attachment; filename="${decodeURIComponent(path.split('/').pop())}"`);
-  response.body.pipe(res);
+    if (!response.ok) {
+      const text = await response.text();
+      return res.status(response.status).send(text);
+    }
+
+    // Repassa o tipo de conteúdo e força o download
+    res.setHeader('Content-Type', response.headers.get('content-type') || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${decodeURIComponent(path.split('/').pop())}"`);
+
+    // Faz streaming do conteúdo direto para o navegador
+    response.body.pipe(res);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erro ao baixar o arquivo', details: err.message });
+  }
 });
 
 app.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
+  console.log(`Proxy rodando na porta ${PORT}`);
 });
