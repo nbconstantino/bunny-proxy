@@ -11,107 +11,70 @@ const HOSTNAME = 'br.storage.bunnycdn.com';
 
 app.use(cors());
 
-// 🔍 Função auxiliar para buscar arquivos recursivamente
-async function listFilesRecursive(path) {
-  const files = [];
+// Função recursiva para listar arquivos de subpastas
+async function listarArquivos(path) {
+  const url = `https://${HOSTNAME}/${STORAGE_ZONE}/${path}`;
+  const response = await fetch(url, {
+    headers: {
+      AccessKey: API_KEY,
+      Accept: 'application/json'
+    }
+  });
 
-  async function walk(folderPath) {
-    const url = `https://${HOSTNAME}/${STORAGE_ZONE}/${folderPath}`;
-    const response = await fetch(url, {
-      headers: {
-        AccessKey: API_KEY,
-        Accept: 'application/json'
-      }
-    });
+  if (!response.ok) throw new Error(`Erro ao acessar ${path}: ${await response.text()}`);
 
-    if (!response.ok) return;
+  const arquivos = await response.json();
+  let todos = [];
 
-    const data = await response.json();
-
-    for (const item of data) {
-      if (item.IsDirectory) {
-        await walk(`${folderPath}${item.ObjectName}/`);
-      } else {
-        files.push({
-          Path: `${folderPath}${item.ObjectName}`,
-          Name: item.ObjectName,
-          Length: item.Length,
-          LastChanged: item.LastChanged
-        });
-      }
+  for (const item of arquivos) {
+    if (item.IsDirectory) {
+      const subPath = `${path}/${item.ObjectName}`;
+      const subArquivos = await listarArquivos(subPath);
+      todos = todos.concat(subArquivos);
+    } else {
+      todos.push({ ...item, fullPath: `${path}/${item.ObjectName}` });
     }
   }
 
-  await walk(path.endsWith('/') ? path : path + '/');
-  return files;
+  return todos;
 }
 
-// 🗂 Listagem de arquivos (normal ou recursiva)
+// Endpoint de listagem
 app.get('/list', async (req, res) => {
   try {
-    const path = req.query.path || '';
-    const recursive = req.query.recursive === 'true';
+    const path = req.query.path;
+    const term = (req.query.term || '').toLowerCase();
+    const type = req.query.type;
 
-    if (!path) {
-      return res.status(400).json({ error: 'Parâmetro path é obrigatório' });
-    }
+    if (!path) return res.status(400).json({ error: 'Path é obrigatório' });
 
-    if (recursive) {
-      const files = await listFilesRecursive(path);
-      return res.json(files);
-    }
+    const arquivos = await listarArquivos(path);
+    const filtrados = arquivos.filter(file =>
+      file.ObjectName.toLowerCase().includes(term) &&
+      (!type || file.ObjectName.toLowerCase().endsWith(type))
+    );
 
-    const normalizedPath = path.endsWith('/') ? path : path + '/';
-    const url = `https://${HOSTNAME}/${STORAGE_ZONE}/${normalizedPath}`;
-
-    const response = await fetch(url, {
-      headers: {
-        AccessKey: API_KEY,
-        Accept: 'application/json'
-      }
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      return res.status(response.status).json({ error: 'Erro ao listar arquivos', details: errorText });
-    }
-
-    const data = await response.json();
-    res.json(data);
+    res.json(filtrados);
   } catch (err) {
-    res.status(500).json({ error: 'Erro interno no servidor', details: err.message });
+    res.status(500).json({ error: err.message });
   }
 });
 
-// 📥 Proxy para download autenticado
+// Endpoint de download autenticado
 app.get('/download', async (req, res) => {
   const path = req.query.path;
-  if (!path) return res.status(400).json({ error: 'Parâmetro path é obrigatório' });
+  if (!path) return res.status(400).json({ error: 'Path é obrigatório' });
 
   const url = `https://${HOSTNAME}/${STORAGE_ZONE}/${path}`;
+  const response = await fetch(url, { headers: { AccessKey: API_KEY } });
 
-  try {
-    const response = await fetch(url, {
-      headers: {
-        AccessKey: API_KEY
-      }
-    });
+  if (!response.ok) return res.status(response.status).send(await response.text());
 
-    if (!response.ok) {
-      const text = await response.text();
-      return res.status(response.status).send(text);
-    }
-
-    res.setHeader('Content-Type', response.headers.get('content-type') || 'application/octet-stream');
-    res.setHeader('Content-Disposition', `attachment; filename="${decodeURIComponent(path.split('/').pop())}"`);
-
-    response.body.pipe(res);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Erro ao baixar o arquivo', details: err.message });
-  }
+  res.setHeader('Content-Type', response.headers.get('content-type') || 'application/octet-stream');
+  res.setHeader('Content-Disposition', `attachment; filename="${decodeURIComponent(path.split('/').pop())}"`);
+  response.body.pipe(res);
 });
 
 app.listen(PORT, () => {
-  console.log(`Proxy rodando na porta ${PORT}`);
+  console.log(`Servidor rodando na porta ${PORT}`);
 });
