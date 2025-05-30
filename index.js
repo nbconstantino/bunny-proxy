@@ -11,12 +11,54 @@ const HOSTNAME = 'br.storage.bunnycdn.com';
 
 app.use(cors());
 
-// Endpoint para listar arquivos de uma pasta
+// 🔍 Função auxiliar para buscar arquivos recursivamente
+async function listFilesRecursive(path) {
+  const files = [];
+
+  async function walk(folderPath) {
+    const url = `https://${HOSTNAME}/${STORAGE_ZONE}/${folderPath}`;
+    const response = await fetch(url, {
+      headers: {
+        AccessKey: API_KEY,
+        Accept: 'application/json'
+      }
+    });
+
+    if (!response.ok) return;
+
+    const data = await response.json();
+
+    for (const item of data) {
+      if (item.IsDirectory) {
+        await walk(`${folderPath}${item.ObjectName}/`);
+      } else {
+        files.push({
+          Path: `${folderPath}${item.ObjectName}`,
+          Name: item.ObjectName,
+          Length: item.Length,
+          LastChanged: item.LastChanged
+        });
+      }
+    }
+  }
+
+  await walk(path.endsWith('/') ? path : path + '/');
+  return files;
+}
+
+// 🗂 Listagem de arquivos (normal ou recursiva)
 app.get('/list', async (req, res) => {
   try {
     const path = req.query.path || '';
+    const recursive = req.query.recursive === 'true';
+
     if (!path) {
       return res.status(400).json({ error: 'Parâmetro path é obrigatório' });
+    }
+
+    if (recursive) {
+      const files = await listFilesRecursive(path);
+      return res.json(files);
     }
 
     const normalizedPath = path.endsWith('/') ? path : path + '/';
@@ -41,7 +83,7 @@ app.get('/list', async (req, res) => {
   }
 });
 
-// Endpoint para download autenticado de arquivos
+// 📥 Proxy para download autenticado
 app.get('/download', async (req, res) => {
   const path = req.query.path;
   if (!path) return res.status(400).json({ error: 'Parâmetro path é obrigatório' });
