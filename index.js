@@ -11,11 +11,13 @@ const HOSTNAME = 'br.storage.bunnycdn.com';
 
 app.use(cors());
 
-// Listagem de arquivos em uma pasta
+// Endpoint para listar arquivos de uma pasta
 app.get('/list', async (req, res) => {
   try {
     const path = req.query.path || '';
-    if (!path) return res.status(400).json({ error: 'Parâmetro path é obrigatório' });
+    if (!path) {
+      return res.status(400).json({ error: 'Parâmetro path é obrigatório' });
+    }
 
     const normalizedPath = path.endsWith('/') ? path : path + '/';
     const url = `https://${HOSTNAME}/${STORAGE_ZONE}/${normalizedPath}`;
@@ -39,7 +41,7 @@ app.get('/list', async (req, res) => {
   }
 });
 
-// Proxy de download autenticado
+// Endpoint para download autenticado de arquivos
 app.get('/download', async (req, res) => {
   const path = req.query.path;
   if (!path) return res.status(400).json({ error: 'Parâmetro path é obrigatório' });
@@ -58,11 +60,9 @@ app.get('/download', async (req, res) => {
       return res.status(response.status).send(text);
     }
 
-    // Repassa o tipo de conteúdo e força o download
     res.setHeader('Content-Type', response.headers.get('content-type') || 'application/octet-stream');
     res.setHeader('Content-Disposition', `attachment; filename="${decodeURIComponent(path.split('/').pop())}"`);
 
-    // Faz streaming do conteúdo direto para o navegador
     response.body.pipe(res);
   } catch (err) {
     console.error(err);
